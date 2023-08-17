@@ -1,74 +1,71 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const { Builder, By } = require('selenium-webdriver');
-const chrome = require('selenium-webdriver/chrome');
+const puppeteer = require('puppeteer');
 
 const app = express();
 
-// Middleware to parse POST data
-app.use(bodyParser.urlencoded({ extended: true }));
-
-// Set the view engine to ejs
 app.set('view engine', 'ejs');
 
-// Serve the form on the root route
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
+const PORT = 3000;
+
 app.get('/', (req, res) => {
-    res.render('index', { results: null, error: null });
+    res.render('index');
 });
 
-// Handle form submission
-app.post('/scrape', async (req, res) => {
-    let driver;
+app.post('/search', async (req, res) => {
+    const searchTerm = req.body.term;
+    const url = 'https://www.italgiure.giustizia.it/sncass/';
+
     try {
-        const query = req.body.query;
-        const limit = parseInt(req.body.limit, 10);
+        const browser = await puppeteer.launch({ headless: true });
+        const page = await browser.newPage();
+        
+        await page.goto(url);
+        
+        await page.type('#searchterm', searchTerm);
+        await page.click('button[title="Avvia ricerca"]');
+        
+        await page.waitForTimeout(5000);
 
-        let options = new chrome.Options();
-        options = options.headless();
+        const results = await page.$$eval('h3.doctitle', h3Elements => {
+            return h3Elements.map(h3 => {
+                const linkElement = h3.querySelector('.toDocument.pdf');
+                const link = linkElement ? "https://www.italgiure.giustizia.it" + decodeURIComponent(linkElement.getAttribute('data-arg')) : null;
 
-        driver = await new Builder().forBrowser('chrome').setChromeOptions(options).build();
+                const sectionElement = h3.querySelector('.risultato[data-role="content"][data-arg="szdec"]');
+                const section = sectionElement ? sectionElement.textContent : null;
 
+                const typeElement = h3.querySelector('[data-role="content"][data-arg="tipoprov"]');
+                const type = typeElement ? typeElement.textContent : null;
 
-        let results = [];
-        const url = "https://www.giustizia-amministrativa.it/dcsnprr";
-        await driver.get(url);
+                const numberElement = h3.querySelector('.chkcontent [data-role="content"][data-arg="numcard"]');
+                const number = numberElement ? numberElement.textContent : null;
 
-        const advancedSearchElement = await driver.findElement(By.xpath('//div[contains(text(), "Ricerca Avanzata")]'));
-        await advancedSearchElement.click();
+                const dateElement = h3.querySelector('.chkcontent [data-role="content"][data-arg="datdep"]');
+                const date = dateElement ? dateElement.textContent : null;
 
-        const inputElement = await driver.findElement(By.id("_GaSearch_INSTANCE_2NDgCF3zWBwk_searchPhrase"));
-        await inputElement.sendKeys(query);
-
-        const searchButton = await driver.findElement(By.id("_GaSearch_INSTANCE_2NDgCF3zWBwk_submitButton"));
-        await searchButton.click();
-
-        await driver.sleep(5000);
-
-        const linkElements = await driver.findElements(By.className('visited-provvedimenti'));
-        const linkUrls = [];
-        for (let link of linkElements) {
-            const linkUrl = await link.getAttribute('href');
-            linkUrls.push(linkUrl);
-        }
-
-        for (let i = 0; i < Math.min(limit, linkUrls.length); i++) {
-            await driver.get(linkUrls[i]);
-            await driver.sleep(3000);  // Wait for the page to load
-            results.push({
-                text: `Link ${i + 1}`,
-                href: linkUrls[i]
+                return {
+                    link,
+                    section,
+                    type,
+                    number,
+                    date
+                };
             });
-        }
-        res.render('index', { results: results, error: null });
+        });
+
+        await browser.close();
+
+        res.json({ results });
     } catch (error) {
-        console.error("Error occurred during scraping:", error);
-        res.render('index', { results: null, error: "There was an error processing your request. Please try again later." });
-    } finally {
-        await driver.quit();
+        console.error(error);
+        res.status(500).json({ error: 'Failed to fetch data' });
     }
 });
 
-const PORT = 80;
 app.listen(PORT, () => {
-    console.log(`Server started on http://localhost:${PORT}`);
+    console.log(`Server is running on port ${PORT}`);
 });
