@@ -1,6 +1,7 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const puppeteer = require('puppeteer');
+const axios = require('axios');
+const cheerio = require('cheerio');
 const winston = require('winston'); // Add Winston for logging
 
 const app = express();
@@ -36,48 +37,39 @@ app.post('/search', async (req, res) => {
     const url = 'https://www.italgiure.giustizia.it/sncass/';
 
     try {
-        const browser = await puppeteer.launch({ headless: true });
-        const page = await browser.newPage();
+        const response = await axios.get(url);
+        const $ = cheerio.load(response.data);
 
-        await page.goto(url);
+        const results = [];
 
-        // Wait for the search results to load
-        await page.waitForSelector('h3.doctitle');
+        $('h3.doctitle').each((index, element) => {
+            try {
+                const linkElement = $(element).find('.toDocument.pdf');
+                const link = linkElement ? "https://www.italgiure.giustizia.it" + decodeURIComponent(linkElement.attr('data-arg')) : null;
 
-        const results = await page.$$eval('h3.doctitle', h3Elements => {
-            return h3Elements.map(h3 => {
-                try {
-                    const linkElement = h3.querySelector('.toDocument.pdf');
-                    const link = linkElement ? "https://www.italgiure.giustizia.it" + decodeURIComponent(linkElement.getAttribute('data-arg')) : null;
+                const sectionElement = $(element).find('.risultato[data-role="content"][data-arg="szdec"]');
+                const section = sectionElement ? sectionElement.text() : null;
 
+                const typeElement = $(element).find('[data-role="content"][data-arg="tipoprov"]');
+                const type = typeElement ? typeElement.text() : null;
 
-                    const sectionElement = h3.querySelector('.risultato[data-role="content"][data-arg="szdec"]');
-                    const section = sectionElement ? sectionElement.textContent : null;
+                const numberElement = $(element).find('.chkcontent [data-role="content"][data-arg="numcard"]');
+                const number = numberElement ? numberElement.text() : null;
 
-                    const typeElement = h3.querySelector('[data-role="content"][data-arg="tipoprov"]');
-                    const type = typeElement ? typeElement.textContent : null;
+                const dateElement = $(element).find('.chkcontent [data-role="content"][data-arg="datdep"]');
+                const date = dateElement ? dateElement.text() : null;
 
-                    const numberElement = h3.querySelector('.chkcontent [data-role="content"][data-arg="numcard"]');
-                    const number = numberElement ? numberElement.textContent : null;
-
-                    const dateElement = h3.querySelector('.chkcontent [data-role="content"][data-arg="datdep"]');
-                    const date = dateElement ? dateElement.textContent : null;
-
-                    return {
-                        link,
-                        section,
-                        type,
-                        number,
-                        date
-                    };
-                } catch (error) {
-                    logger.error(`Error processing result: ${error}`);
-                    return null; // Skip this result in case of error
-                }
-            });
+                results.push({
+                    link,
+                    section,
+                    type,
+                    number,
+                    date
+                });
+            } catch (error) {
+                logger.error(`Error processing result: ${error}`);
+            }
         });
-
-        await browser.close();
 
         res.json({ results });
     } catch (error) {
