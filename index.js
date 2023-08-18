@@ -10,7 +10,7 @@ app.set('view engine', 'ejs');
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // Configure Winston logging
 const logger = winston.createLogger({
@@ -41,16 +41,15 @@ app.post('/search', async (req, res) => {
 
         await page.goto(url);
 
-        await page.type('#searchterm', searchTerm);
-        await page.click('button[title="Avvia ricerca"]');
-
-        await page.waitForTimeout(5000);
+        // Wait for the search results to load
+        await page.waitForSelector('h3.doctitle');
 
         const results = await page.$$eval('h3.doctitle', h3Elements => {
             return h3Elements.map(h3 => {
                 try {
                     const linkElement = h3.querySelector('.toDocument.pdf');
                     const link = linkElement ? "https://www.italgiure.giustizia.it" + decodeURIComponent(linkElement.getAttribute('data-arg')) : null;
+
 
                     const sectionElement = h3.querySelector('.risultato[data-role="content"][data-arg="szdec"]');
                     const section = sectionElement ? sectionElement.textContent : null;
@@ -87,6 +86,11 @@ app.post('/search', async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-});
+(async () => {
+    try {
+        await app.listen(PORT);
+        console.log(`Server is running on port ${PORT}`);
+    } catch (error) {
+        logger.error(`Error starting server: ${error}`);
+    }
+})();
